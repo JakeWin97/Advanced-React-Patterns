@@ -7,6 +7,7 @@ import React, {
   useEffect,
 } from "react";
 import styles from "./index.css";
+import userStyles from "./usage.css";
 
 const INITIAL_STATE = {
   count: 0,
@@ -126,10 +127,29 @@ const useDOMRef = () => {
 };
 
 /**
+ *
+ * custom hook for getting previous prop/state
+ */
+const usePrevious = (value) => {
+  const ref = useRef();
+  useEffect(() => {
+    ref.current = value;
+  });
+  return ref.current;
+};
+
+const callFnsInSequence =
+  (...fns) =>
+  (...args) => {
+    fns.forEach((fn) => fn && fn(...args));
+  };
+
+/**
  * custom hook for useClapState
  */
 const useClapState = (initialState = INITIAL_STATE) => {
   const MAXIMUM_USER_CLAP = 50;
+  const userInitialState = useRef(initialState);
 
   const [clapState, setClapState] = useState(initialState);
 
@@ -143,22 +163,38 @@ const useClapState = (initialState = INITIAL_STATE) => {
     }));
   }, [count, countTotal]);
 
-  // acccesability
-  // props collection for "click"
-  const togglerProps = {
-    onClick: updateClapState,
-    "aria-pressed": clapState.isClicked,
-  };
+  const resetRef = useRef(0);
+  const prevCount = usePrevious(count);
 
-  // props collection for "count"
-  const counterProps = {
+  const reset = useCallback(() => {
+    if (prevCount !== count) {
+      setClapState(userInitialState.current);
+      resetRef.current++;
+    }
+  }, [prevCount, count, setClapState]);
+
+  const getTogglerProps = ({ onClick, ...otherProps } = {}) => ({
+    onClick: callFnsInSequence(updateClapState, onClick),
+    "aria-pressed": clapState.isClicked,
+    ...otherProps,
+  });
+
+  const getCounterProps = ({ ...otherProps }) => ({
     count,
     "aria-valuemax": MAXIMUM_USER_CLAP,
     "aria-valuemin": 0,
     "aria-valuenow": count,
-  };
+    ...otherProps,
+  });
 
-  return { clapState, updateClapState, togglerProps, counterProps };
+  return {
+    clapState,
+    updateClapState,
+    getTogglerProps,
+    getCounterProps,
+    reset,
+    resetDep: resetRef.current,
+  };
 };
 
 /**
@@ -227,9 +263,15 @@ const CountTotal = ({ countTotal, setRef, ...restProps }) => {
  * Usage
  */
 
+const userInitialState = {
+  count: 0,
+  countTotal: 1000,
+  isClicked: false,
+};
+
 const Usage = () => {
-  const { clapState, updateClapState, togglerProps, counterProps } =
-    useClapState();
+  const { clapState, getTogglerProps, getCounterProps, reset, resetDep } =
+    useClapState(userInitialState);
   const { count, countTotal, isClicked } = clapState;
 
   const [{ clapRef, clapCountRef, clapTotalRef }, setRef] = useDOMRef();
@@ -244,16 +286,55 @@ const Usage = () => {
     animationTimeline.replay();
   }, [count]);
 
+  const [uploadingReset, setUpload] = useState(false);
+
+  useEffectAfterMount(() => {
+    setUpload(true);
+    const id = setTimeout(() => {
+      setUpload(false);
+    }, 3000);
+
+    return () => clearTimeout(id);
+  }, [resetDep]);
+
+  const handleClick = () => {
+    console.log("CLICKED!!!!");
+  };
+
   return (
-    <ClapContainer setRef={setRef} data-refkey="clapRef" {...togglerProps}>
-      <ClapIcon isClicked={isClicked} />
-      <ClapCount setRef={setRef} data-refkey="clapCountRef" {...counterProps} />
-      <CountTotal
-        countTotal={countTotal}
+    <div>
+      <ClapContainer
         setRef={setRef}
-        data-refkey="clapTotalRef"
-      />
-    </ClapContainer>
+        data-refkey="clapRef"
+        {...getTogglerProps({
+          onClick: handleClick,
+          "aria-pressed": false,
+        })}
+      >
+        <ClapIcon isClicked={isClicked} />
+        <ClapCount
+          setRef={setRef}
+          data-refkey="clapCountRef"
+          {...getCounterProps()}
+        />
+        <CountTotal
+          countTotal={countTotal}
+          setRef={setRef}
+          data-refkey="clapTotalRef"
+        />
+      </ClapContainer>
+      <section>
+        <button onClick={reset} className={userStyles.resetBtn}>
+          Reset
+        </button>
+        <pre className={userStyles.resetMsg}>
+          {JSON.stringify({ count, countTotal, isClicked })}
+        </pre>
+        <pre className={userStyles.resetMsg}>
+          {uploadingReset ? `uploading reset ${resetDep} ...` : ""}
+        </pre>
+      </section>
+    </div>
   );
 };
 
